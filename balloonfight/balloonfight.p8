@@ -23,8 +23,19 @@ gspeed=0.2
 gspeed_max=2
 
 -- change game mode
-function change_mode(mode)
-	mode:init()
+function change_mode(mode_name)
+	mode_name=mode_name or 'menu'
+	if mode_name=='menu' then
+		menu_mode:init()
+	elseif mode_name=='play' then
+  play_mode:init()
+ elseif mode_name=='bonus' then
+ 	bonus_mode:init()
+ elseif mode_name=='tally' then
+ 	tally_mode:init()
+ elseif mode_name=='trip' then
+ 	trip_mode:init()
+ end
 end
 
 -- check for collisions
@@ -67,12 +78,262 @@ function printc(text,y,x1,x2,c)
 	print(text,x,y,c)
 end
 
--- pico-8 init
+-------------------------------
+-- pico-8 callbacks
+-------------------------------
+
+-- pico-8 _init
 function _init()
 	palt(0,false)
 	palt(1,true)
-	change_mode(menu_mode)
+	change_mode('menu')
 end
+
+-->8
+-- modes
+
+-------------------------------
+-- menu
+-------------------------------
+menu_mode={
+	selected=1,
+	items={
+		{text='game start',mode='play'},
+		{text='balloon trip',mode='trip'}
+	}
+}
+function menu_mode:init()
+	_draw=self.draw
+	_update=self.update
+end
+function menu_mode:draw()
+	self=self or menu_mode
+	cls(0)
+	local start_y=16
+	spr(192,16,start_y+8,12,2)
+	spr(224,40,start_y+25,9,2)
+	for i,item in ipairs(self.items) do
+		local y=(i-1)*10+start_y+50
+		if self.selected==i then
+			rectfill(16,y-2,112,y+6,8)
+		end
+		printc(item.text,y,nil,nil,7)
+	end	
+end
+function menu_mode:update()
+	self=self or menu_mode
+	if btnp(⬆️) then
+		self.selected-=1
+	end
+	if btnp(⬇️) then
+		self.selected+=1
+	end
+	self.selected=mid(1,self.selected,2)
+	if btnp(4) or btnp(5) then
+		local item=self.items[self.selected]
+		change_mode(item.mode)		
+	end
+end
+
+-------------------------------
+-- play
+-------------------------------
+play_mode={}
+function play_mode:init()
+ bgstars:init()
+ level:get()
+ player.x=8
+ player.y=120
+	_update=self.update
+	_draw=self.draw
+end
+function play_mode:update()
+	ticks=ticks+1
+ bgstars:update()
+ enemies:update()
+ player:update()
+ debug:update()
+end
+function play_mode:draw()
+ cls(1)
+ bgstars:draw()
+ level:draw()
+ osd:draw()
+ enemies:draw()
+ player:draw()
+	debug:draw()
+end
+
+-------------------------------
+-- bonus
+-------------------------------
+bonus_mode={
+	balloons={},
+	balloon_max=20,
+	delay=30,
+	pipes={
+		{col=2,row=13},
+		{col=5,row=12},
+		{col=10,row=14},
+		{col=13,row=13}
+	}
+}
+function bonus_mode:init()
+	self.timer=0
+	self.counter=0
+	self.collected=0
+	bgstars:init()
+	level:get(0)
+	player.balloons=2
+	player.x=56
+	player.y=127
+	_update=self.update
+	_draw=self.draw
+end
+function bonus_mode:draw()
+	self=self or bonus_mode
+ cls(1)
+ bgstars:draw()
+	for ball in all(self.balloons) do
+		spr(30,ball.x,ball.y)
+	end
+ level:draw()
+ osd:draw()
+ player:draw()
+	debug:draw()
+end
+function bonus_mode:new_balloon()
+	local n=flr(rnd(4))+1
+	local pipe=self.pipes[n]
+	local anchor_x=pipe.col*8
+	balloon={
+		anchor_x=anchor_x,
+		x=anchor_x,
+		y=pipe.row*8,
+		sine=0
+	}
+	add(self.balloons,balloon)
+	self.counter+=1
+end
+function bonus_mode:update()
+	self=self or bonus_mode
+	ticks=ticks+1
+	self.timer+=1
+	if self.timer>self.delay then
+		if self.counter>
+				self.balloon_max then
+			if count(self.balloons)==0 then
+				change_mode('tally')
+			end
+		else
+			self:new_balloon()
+		end
+		self.timer=0
+	end
+ bgstars:update()
+ for ball in all(self.balloons) do
+		ball.y-=1
+		ball.sine+=0.01
+		ball.x=ball.anchor_x+sin(ball.sine)*5
+		ball.body={
+			y=ball.y,
+			x=ball.x,
+			width=8,
+			height=8
+		}
+		if ball.y<-8 then
+			del(self.balloons,ball)
+		end
+		if collision(player.body,
+				ball.body) then
+			self.collected+=1
+			del(self.balloons,ball)
+		end
+	end
+ player:update()
+ debug:update()
+end
+
+-------------------------------
+-- tally
+-------------------------------
+tally_mode={
+	step=20,
+	value=300,
+	super=10000
+}
+function tally_mode:init()
+	self.timer=0
+	self.state=1
+	self.total=0
+	self.state='init'
+	if bonus_mode.collected then
+		self.total=bonus_mode.collected*self.value
+	end
+	_draw=self.draw
+	_update=self.update
+end
+function tally_mode:draw()
+	self=self or tally_mode
+	cls(1)
+	osd:draw()
+	local x=8
+	local y=40
+	spr(96,x,y,2,2,true)
+	if self.timer<=self.step*2 then
+		spr(30,x+20,y+4)
+	else
+		print('300',x+20,y+6)
+	end
+	local text=''
+	if self.timer>self.step then
+		text..='x '..tostr(bonus_mode.collected)
+	end
+	if self.timer>self.step*2 then
+		text..=' = '..tostr(self.total)..' pts.'
+	end
+	if self.timer>self.step*3 then
+		printc('p e r f e c t !!!',y+40,nil,nil,9)
+		printc('super bonus  '..self.super..'pts!',y+50,nil,nil,9)
+	end
+	print(text,x+36,y+6,7)
+end
+function tally_mode:update()
+	self=self or tally_mode
+	if self.timer==self.step*2 then
+
+	end
+	if self.timer==self.step*3 then
+		if bonus_mode.collected==bonus_mode.balloon_max then
+			--sfx
+			player.score+=self.super
+		end
+	end
+	if self.state=='init' then
+		self.timer+=1
+		if self.timer>self.step*4 then
+			self.state='countdown'
+		end
+	elseif self.state=='countdown' then
+		if self.total<=0 then
+			self.state='complete'
+		else
+			player.score+=100
+			self.total-=100
+		end
+	else
+		self.timer+=1
+		if self.timer>self.step*5 then
+			level:get(level.current+1)
+			change_mode('play')
+		end
+	end
+end
+
+-------------------------------
+-- trip
+-------------------------------
+
 
 -->8
 -- bgstars
@@ -130,7 +391,7 @@ end
 -- level
 
 level={
-	current=1,
+	current=3,
 	celx=0,
 	cely=0
 }
@@ -397,6 +658,10 @@ function debug:input()
 		end
 	end
 	
+	if key=='e' then
+		enemies:new(64,64)
+	end
+	
 	if key=='f' then
 		balloons:new()
 	end
@@ -437,255 +702,44 @@ function osd:draw()
 	print('000000',95,2,7)
 
 end
--->8
--- play mode
-
-play_mode={}
-
-function play_mode:init()
- bgstars:init()
- level:get()
- player.x=8
- player.y=120
-	_update=self.update
-	_draw=self.draw
-end
-
-function play_mode:update()
-	ticks=ticks+1
- bgstars:update()
- player:update()
- debug:update()
-end
-
-function play_mode:draw()
- cls(1)
- bgstars:draw()
- level:draw()
- osd:draw()
- player:draw()
-	debug:draw()
-end
-
 
 -->8
--- bonus mode
+-- enemies
 
-bonus_mode={
-	balloons={},
-	balloon_max=20,
-	delay=30,
-	pipes={
-		{col=2,row=13},
-		{col=5,row=12},
-		{col=10,row=14},
-		{col=13,row=13}
-	}
+enemies={
+	units={}
 }
 
-function bonus_mode:init()
-	self.timer=0
-	self.counter=0
-	self.collected=0
-	bgstars:init()
-	level:get(0)
-	player.balloons=2
-	player.x=56
-	player.y=127
-	_update=self.update
-	_draw=self.draw
-end
-
-function bonus_mode:draw()
-	self=self or bonus_mode
- cls(1)
- bgstars:draw()
-	for ball in all(self.balloons) do
-		spr(30,ball.x,ball.y)
+function enemies:draw()
+	for enemy in all(self.units) do
+		spr(72,enemy.x,enemy.y,2,2)
 	end
- level:draw()
- osd:draw()
- player:draw()
-	debug:draw()
 end
 
-function bonus_mode:new_balloon()
-	local n=flr(rnd(4))+1
-	local pipe=self.pipes[n]
-	local anchor_x=pipe.col*8
-	balloon={
-		anchor_x=anchor_x,
-		x=anchor_x,
-		y=pipe.row*8,
-		sine=0
-	}
-	add(self.balloons,balloon)
-	self.counter+=1
-end
-
-function bonus_mode:update()
-	self=self or bonus_mode
-	ticks=ticks+1
-	self.timer+=1
-	if self.timer>self.delay then
-		if self.counter>
-				self.balloon_max then
-			if count(self.balloons)==0 then
-				change_mode(tally_mode)
-			end
-		else
-			self:new_balloon()
-		end
-		self.timer=0
-	end
- bgstars:update()
- for ball in all(self.balloons) do
-		ball.y-=1
-		ball.sine+=0.01
-		ball.x=ball.anchor_x+sin(ball.sine)*5
-		ball.body={
-			y=ball.y,
-			x=ball.x,
+function enemies:new(x,y)
+	local enemy={
+		x=x,
+		y=y,
+		body={
+			x=x,
+			y=y,
 			width=8,
-			height=8
+			height=16
+		},
+		velocity={
+			x=0,
+			y=0
 		}
-		if ball.y<-8 then
-			del(self.balloons,ball)
-		end
-		if collision(player.body,
-				ball.body) then
-			self.collected+=1
-			del(self.balloons,ball)
-		end
-	end
- player:update()
- debug:update()
-end
-
--->8
--- bonus tally mode
-
-tally_mode={
-	step=20,
-	value=300,
-	super=10000
-}
-
-function tally_mode:init()
-	self.timer=0
-	self.state=1
-	self.total=0
-	self.state='init'
-	if bonus_mode.collected then
-		self.total=bonus_mode.collected*self.value
-	end
-	_draw=self.draw
-	_update=self.update
-end
-
-function tally_mode:draw()
-	self=self or tally_mode
-	cls(1)
-	osd:draw()
-	local x=8
-	local y=40
-	spr(96,x,y,2,2,true)
-	if self.timer<=self.step*2 then
-		spr(30,x+20,y+4)
-	else
-		print('300',x+20,y+6)
-	end
-	local text=''
-	if self.timer>self.step then
-		text..='x '..tostr(bonus_mode.collected)
-	end
-	if self.timer>self.step*2 then
-		text..=' = '..tostr(self.total)..' pts.'
-	end
-	if self.timer>self.step*3 then
-		printc('p e r f e c t !!!',y+40,nil,nil,9)
-		printc('super bonus  '..self.super..'pts!',y+50,nil,nil,9)
-	end
-	print(text,x+36,y+6,7)
-end
-
-function tally_mode:update()
-	self=self or tally_mode
-	if self.timer==self.step*2 then
-
-	end
-	if self.timer==self.step*3 then
-		if bonus_mode.collected==bonus_mode.balloon_max then
-			--sfx
-			player.score+=self.super
-		end
-	end
-	if self.state=='init' then
-		self.timer+=1
-		if self.timer>self.step*4 then
-			self.state='countdown'
-		end
-	elseif self.state=='countdown' then
-		if self.total<=0 then
-			self.state='complete'
-		else
-			player.score+=100
-			self.total-=100
-		end
-	else
-		self.timer+=1
-		if self.timer>self.step*5 then
-			level:get(level.current+1)
-			change_mode(play_mode)
-		end
-	end
-end
-
--->8
--- menu mode
-
-menu_mode={
-	selected=1,
-	items={
-		{text='game start',mode=play_mode},
-		{text='balloon trip',mode=trip_mode}
 	}
-}
-
-function menu_mode:init()
-	_draw=self.draw
-	_update=self.update
+	add(self.units,enemy)
 end
 
-function menu_mode:draw()
-	self=self or menu_mode
-	cls(0)
-	local start_y=16
-	spr(192,16,start_y+8,12,2)
-	spr(224,40,start_y+25,9,2)
-	
-	for i,item in ipairs(self.items) do
-		local y=(i-1)*10+start_y+50
-		if self.selected==i then
-			rectfill(16,y-2,112,y+6,8)
-		end
-		printc(item.text,y,nil,nil,7)
-	end	
-
-end
-
-function menu_mode:update()
-	self=self or menu_mode
-	if btnp(⬆️) then
-		self.selected-=1
-	end
-	if btnp(⬇️) then
-		self.selected+=1
-	end
-	self.selected=mid(1,self.selected,2)
-	if btnp(4) or btnp(5) then
-		local item=self.items[self.selected]
-		change_mode(item.mode)		
+function enemies:update()
+	for enemy in all(self.units) do
+		enemy.velocity.y+=gravity
+		enemy.y+=enemy.velocity.y
+		enemy.body.x=enemy.x+4
+		enemy.body.y=enemy.y
 	end
 end
 
@@ -722,20 +776,20 @@ __gfx__
 11110f8888ff011111110f8888ff011111110f8888ff01111110f88ff0111111110c888880111111111108888c01111111111111111111111111111111111111
 1111108808801111111110880880111111111088088011111110cc08801111111110c0088c0111111111108088c0111111111111111111111111111111111111
 11110cc010cc011111110cc010cc011111110cc010cc0111111110cc0111111111111110cc01111111110cc01111111111111111111111111111111111111111
-11111088008801111111108800880111111110880088011111111088008801111111111111111111111111111111111111111111111111111111111111111111
-11110887828780111111088782878011111108878287801111110887828780111111111111111111111111111111111111111111111111111111111111111111
-11108888782878011110888878287801111088887828780111108888782878011111111111111111111111111111111111111111111111111111111111111111
-11108888882888011110888888288801111088888828880111108888882888011111111111111111111111111111111111111111111111111111111111111111
-11110888828880111111088882888011111108888288801111110888828880111111111111111111111111111111111111111111111111111111111111111111
-11111088008801111111108800880111111110880088011111111088008801111111111111111111111111111111111111111111111111111111111111111111
-11111070070111111111107007011111111110700701111111111070070111111111111111111111111111111111111111111111111111111111111111111111
-11110ccc7011111111110ccc7011111111110ccc70f0111111110ccc701111111111111111111111111111111111111111111111111111111111111111111111
-11110ffcc011111111110ffcc011111111110ffcc0ff011111110ffcc01111111111111111111111111111111111111111111111111111111111111111111111
-1110fffcc01111111110fffcc0ff01111110fffcc0c011111110fffcc01111111111111111111111111111111111111111111111111111111111111111111111
-11110ffc0111111111110ffc8ccf011111110ffc8c01111111110ffc880111111111111111111111111111111111111111111111111111111111111111111111
-1110f088c011111111111087880111111111108788011111111110878c0111111111111111111111111111111111111111111111111111111111111111111111
-11110878fc011111111111088801111111111108880111111111110888cf01111111111111111111111111111111111111111111111111111111111111111111
-110c8888ff011111111110cc80111111111110cc80111111111110cc80ff01111111111111111111111111111111111111111111111111111111111111111111
+1111108800880111111110880088011111111088008801111111108800880111111110bb01111111111110bb01111111111110bb011111111111111111111111
+111108878287801111110887828780111111088782878011111108878287801111110bb7b011111111110bb7b011111111110bb7b01111111111111111111111
+11108888782878011110888878287801111088887828780111108888782878011110bbbb7b0111111110bbbb7b0111111110bbbb7b0111111111111111111111
+11108888882888011110888888288801111088888828880111108888882888011110bbbbbb0111111110bbbbbb0111111110bbbbbb0111111111111111111111
+111108888288801111110888828880111111088882888011111108888288801111110bbbb011111111110bbbb011111111110bbbb01111111111111111111111
+1111108800880111111110880088011111111088008801111111108800880111111110bb01111111111110bb01111111111110bb011111111111110d01111111
+111110700701111111111070070111111111107007011111111110700701111111111070d011111111111070d011111111111070d01111111111044d01111111
+11110ccc7011111111110ccc7011111111110ccc70f0111111110ccc7011111111110444d040111111110444d011111111110444d01111111110b7444dd01111
+11110ffcc011111111110ffcc011111111110ffcc0ff011111110ffcc01111111110b744404401111110b744401111111110b744401111111044444bbddd0111
+1110fffcc01111111110fffcc0ff01111110fffcc0c011111110fffcc01111111044444bb0b011111044444bb04401111044444bb011111110400bbbddddd011
+11110ffc0111111111110ffc8ccf011111110ffc8c01111111110ffc8801111111110bbbdb01111111110bbbdbb4011111110bbbdd011111111110ddbbddd011
+1110f088c011111111111087880111111111108788011111111110878c011111111110dddd011111111110dddd011111111110dddb0111111111110bbdd4d011
+11110878fc011111111111088801111111111108880111111111110888cf01111111110ddd0111111111110ddd0111111111110dddb401111111110440044011
+110c8888ff011111111110cc80111111111110cc80111111111110cc80ff011111111044d011111111111044d011111111111044d04401111111110401104011
 1110c801111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
@@ -755,21 +809,21 @@ __gfx__
 1111108808801111111110880880111111111088088011111110cc08801111111110c0088c0111111111108088c0111111111111111111111111111111111111
 11110cc010cc011111110cc010cc011111110cc010cc0111111110cc0111111111111110cc01111111110cc01111111111111111111111111111111111111111
 11033b3333b33b3333b3301111111111065556701065670111111111111111111111111111111111111111111111111111111111111111111111111111111111
-103bbb3bb33bbb3bb33bbb0111111111065556701065670111077700777011111111111111111111111111111111111111111111111111111111111111111111
-0bb3bbbbbbb3bbbbbbb3bbb011111111065556701065670110766677666701111111111111111111111111111111111111111111111111111111111111111111
-03444b3443444b3443444b3011111111065556701065670110766666666701111111111111111111111111111111111111111111111111111111111111111111
-c76677ccc76677ccc76677ccc76677cc106567011065670110765665666777011111111111111111111111111111111111111111111111111111111111111111
-76cc667776cc667776cc667776cc6677106567011065670107667557666666701111111111111111111111111111111111111111111111111111111111111111
-6ccccc666ccccc666ccccc666ccccc66106567011065670107666776666666701111111111111111111111111111111111111111111111111111111111111111
-cccccccccccccccccccccccccccccccc106567011065670107666656666656701111111111111111111111111111111111111111111111111111111111111111
-03b33b3333b33b3333b33b3011111111105555011055550107666675555576701111111111111111111111111111111111111111111111111111111111111111
-033bbb3bb33bbb3bb33bbb3011111111044444400444444007666667777766701111111111111111111111111111111111111111111111111111111111111111
-0bb3bbbbbbb3bbbbbbb3bbb011111111044444400444444010776666666667011111111111111111111111111111111111111111111111111111111111111111
-03444b3443444b3443444b3011111111044444400444444011107666666667011111111111111111111111111111111111111111111111111111111111111111
-04444444444444444444444011111111044444401044440111107666776667011111111111111111111111111111111111111111111111111111111111111111
-04444444444444444444440111111111044444401044440111110777007770111111111111111111111111111111111111111111111111111111111111111111
-10444444444444444444401111111111044444401104401111111111111111111111111111111111111111111111111111111111111111111111111111111111
-11044444444444444444011111111111105555011105501111111111111111111111111111111111111111111111111111111111111111111111111111111111
+103bbb3bb33bbb3bb33bbb0111111111065556701065670111766711766711111111111111111111111111111111111111111111111111111111111111111111
+0bb3bbbbbbb3bbbbbbb3bbb011111111065556701065670117666677666671111111111111111111111111111111111111111111111111111111111111111111
+03444b3443444b3443444b3011111111065556701065670117666666666671111111111111111111111111111111111111111111111111111111111111111111
+c76677ccc76677ccc76677ccc76677cc106567011065670117666666666666711111111111111111111111111111111111111111111111111111111111111111
+76cc667776cc667776cc667776cc6677106567011065670176666666666666671111111111111111111111111111111111111111111111111111111111111111
+6ccccc666ccccc666ccccc666ccccc66106567011065670176666666666666671111111111111111111111111111111111111111111111111111111111111111
+cccccccccccccccccccccccccccccccc106567011065670176666666666666671111111111111111111111111111111111111111111111111111111111111111
+03b33b3333b33b3333b33b3011111111104444011044440176666666666666671111111111111111111111111111111111111111111111111111111111111111
+033bbb3bb33bbb3bb33bbb3011111111049999400499994076666666666666671111111111111111111111111111111111111111111111111111111111111111
+0bb3bbbbbbb3bbbbbbb3bbb011111111049999400499994017666666666666711111111111111111111111111111111111111111111111111111111111111111
+03444b3443444b3443444b3011111111049999400499994011176666666666711111111111111111111111111111111111111111111111111111111111111111
+04999449949994499499944011111111049999401049940111176666776666711111111111111111111111111111111111111111111111111111111111111111
+04999999999999999999940111111111049999401049940111117667117667111111111111111111111111111111111111111111111111111111111111111111
+10499999999999999999401111111111049999401104401111111111111111111111111111111111111111111111111111111111111111111111111111111111
+11044444444444444444011111111111104444011104401111111111111111111111111111111111111111111111111111111111111111111111111111111111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
@@ -820,24 +874,24 @@ cccccccccccccccccccccccccccccccc106567011065670107666656666656701111111111111111
 11991111111111111199111111999991119991111191111111999111111111991111111111111111111111111111111111111111111111111111111111111111
 __gff__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0101010204040000000000000000000001010101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0101010204040000000000000000000001010101010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __map__
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffff8687ffffffffffffffffffffffffffffbfbfff91919191ffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffff9697ffffffffffffff9191919191ffffbfbfffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffff8687ffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffff9697ffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffbfffffffffffffffff8687ffffffffffbfffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffbfbfbfbfbfbfffbfbfffffff9697ffffbfbfbfbfbfbfffbfbfffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf9091919191919192ffffffffbfbfbfbf9091919191919192ffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbf
-bfbf84bfbf85bfbfbfbfbfbfbf84bfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbf
-bfbf85bfbf85bfbfbfbf84bfbf85bfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbf
-9191919191919191919191919191919181818182838383838383838380818181818181828383838383838383808181819191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00ff9092ff0000ffffffff90919200bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00ffffffffffffffffffffff94ff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffff8687ffffffffffffffffffffffffffffbfbfff91919191ffff00ffffffffffbfbfbfffffff95ff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffff9697ffffffffffffff9191919191ffffbfbfffffffffffffff00ffffffffff909192ffffffffff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffff8687ffffff00ffffffffffff94ffffffffffff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffff9697ffffff00ffffffffffff95ffffffffffff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffbfffffffffffffffff8687ffffffffffbfffffffffffffffffff00909192ffbfffffffffffffffff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffbfbfbfbfbfbfffbfbfffffff9697ffffbfbfbfbfbfbfffbfbfffffffff00ff94bfbfbfbfbfffbfbfffffff00bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf9091919191919192ffffffffbfbfbfbf9091919191919192ffffffffbfbfbf95bfffffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfffffffffffffffffffffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff909192ffffffffffffbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbf
+bfbf84bfbf85bfbfbfbfbfbfbf84bfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbf
+bfbf85bfbf85bfbfbfbf84bfbf85bfbfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbf
+9191919191919191919191919191919181818182838383838383838380818181818181828383838383838383808181818181818283838383838383838081818191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
