@@ -16,26 +16,15 @@ right=1
 -- physics/speeds
 gravity=0.1
 force=gravity*2
-bounce=force*2
-aspeed=0.2
+bounce=force*10
+aspeed=0.1
 aspeed_max=3
-gspeed=0.2
+gspeed=0.1
 gspeed_max=2
 
 -- change game mode
 function change_mode(mode_name)
-	mode_name=mode_name or 'menu'
-	if mode_name=='menu' then
-		menu_mode:init()
-	elseif mode_name=='play' then
-  play_mode:init()
- elseif mode_name=='bonus' then
- 	bonus_mode:init()
- elseif mode_name=='tally' then
- 	tally_mode:init()
- elseif mode_name=='trip' then
- 	trip_mode:init()
- end
+	modes[mode_name]:init()
 end
 
 -- check for collisions
@@ -76,6 +65,15 @@ function printc(text,y,x1,x2,c)
 	local width=#text*4
 	local x=(x2-x1)/2+x1-width/2
 	print(text,x,y,c)
+end
+
+-- wrap at edge of screen
+function wrap(char)
+	if char.x<-8 then
+		char.x=127-8
+	elseif char.x>127-8 then
+		char.x=-8
+	end
 end
 
 -------------------------------
@@ -142,8 +140,8 @@ play_mode={}
 function play_mode:init()
  bgstars:init()
  level:get()
- player.x=8
- player.y=120
+ player.x=32
+ player.y=90
 	_update=self.update
 	_draw=self.draw
 end
@@ -334,39 +332,46 @@ end
 -- trip
 -------------------------------
 
+-------------------------------
+-- modes references
+-------------------------------
+modes={
+	menu=menu_mode,
+	play=play_mode,
+	bonus=bonus_mode,
+	tally=tally_mode,
+	trip=trip_mode
+}
 
 -->8
 -- bgstars
 
-bgstars={
- units={}
-}
+bgstars={}
 
 function bgstars:init()
  for i=1,25 do
-  local unit={
+  local bgstar={
    x=flr(rnd(128)),
    y=flr(rnd(128))
   }
-  add(self.units,unit)
+  add(self,bgstar)
  end
 end
  
 function bgstars:update()
- for unit in all(self.units) do
+ for bgstar in all(self) do
   if flr(rnd(100)) == 0 then
-   unit.x=flr(rnd(128))
-   unit.y=flr(rnd(128))
+   bgstar.x=flr(rnd(128))
+   bgstar.y=flr(rnd(128))
   end
  end
 end
  
 function bgstars:draw()
- for unit in all(self.units) do
-  pset(unit.x,unit.y,13) 
+ for bgstar in all(self) do
+  pset(bgstar.x,bgstar.y,13) 
  end
 end
-
 
 -->8
 -- input
@@ -391,7 +396,7 @@ end
 -- level
 
 level={
-	current=3,
+	current=10,
 	celx=0,
 	cely=0
 }
@@ -436,11 +441,8 @@ player={
  anim=1,
  balloons=1,
  ball_anim=1,
- bounce=0,
  direction=right,
  lives=2,
- moving=false,
- grounded=false,
  score=0,
  sprites={
  	floating=0,
@@ -449,9 +451,12 @@ player={
   running={38,40,38,42},
   dying={8,10,12,10}
  },
- velocity={x=0,y=0},
+ vel={x=0,y=0},
  body={
  	x=0,y=0,width=8,height=16
+ },
+ ball_body={
+		x=0,y=0,width=8,height=8
  }
 }
  
@@ -492,7 +497,7 @@ function player:animate()
 			self.sprite=self.sprites.flapping[self.anim]
 		--	if floating
 		else
-			self.sprite=self.sprites.floating		
+			self.sprite=self.sprites.floating
 	 end
 	 -- if we have 2 balloons
 	 if self.balloons==2 then
@@ -500,6 +505,7 @@ function player:animate()
 	 end
 	 
 	end
+
 	 
 end
  
@@ -509,26 +515,51 @@ function player:draw()
  if self.direction==right then
   flip_x=true
  end
- spr(self.sprite,self.x,self.y,2,2,flip_x)
- --rect(self.body.x,self.body.y,self.body.x+self.body.width,self.body.y+self.body.height,10)
+ spr(
+ 		self.sprite,
+ 		self.x,
+ 		self.y,
+ 		2,
+ 		2,
+ 		flip_x
+	)
+ rect(
+ 		self.body.x,
+ 		self.body.y,
+ 		self.body.x+
+ 				self.body.width,
+ 		self.body.y+
+ 				self.body.height,
+ 		10
+ )
+ rect(
+ 		self.ball_body.x,
+ 		self.ball_body.y,
+ 		self.ball_body.x+
+ 				self.ball_body.width,
+			self.ball_body.y+
+					self.ball_body.height,
+			12
+	)
 end
 
 -- update player movement
 function player:update()
 
  -- add gravity
-	self.velocity.y+=gravity
+	self.vel.y+=gravity
  
 	-- if we're dead
  if self.balloons==0 then
-
- 	self.y+=self.velocity.y
+		-- *** maybe go up first
+ 	self.y+=self.vel.y
   
+	-- if we're still alive
  else
  
-		-- are too high on screen?
+ 	-- are too high on screen?
 	 if self.y<0 then
-			self.velocity.y+=bounce
+			self.vel.y=bounce
 	 end
 	 
 	 -- get input from player
@@ -541,84 +572,93 @@ function player:update()
 	 	self.direction=right
 	 end
 	 
-	 -- propulsion
+		-- propulsion (lift)
 	 if input.b4 or input.b5 then
-			self.velocity.y-=force
-	 end
+			self.vel.y-=force
+			self.grounded=false
+		end
 	 
 	 -- move while grounded
 	 if self.grounded then
 	 	if input.x==0 then
-		 	self.velocity.x=lerp(
-		 			0,self.velocity.x,0.5)
+		 	self.vel.x=lerp(
+		 			0,self.vel.x,0.5)
 		 else
-		 	self.velocity.x+=input.x
+		 	self.vel.x+=input.x
 		 			*gspeed
-	 		self.velocity.x=mid(
+	 		self.vel.x=mid(
 	 				-gspeed_max,
-	 				self.velocity.x,
+	 				self.vel.x,
 	 				gspeed_max)
 	 	end
 	 	
 		-- air move when flapping
 	 else
 	 	if input.b4 or input.b5 then
-	 		self.velocity.x+=input.x
+	 		self.vel.x+=input.x
 	 				*aspeed
-	 		self.velocity.x=mid(
+	 		self.vel.x=mid(
 	 				-aspeed_max,
-	 				self.velocity.x,
+	 				self.vel.x,
 	 				aspeed_max)
 	 	end
 	 	
 	 end
-	
-		-- check for x collisions
-		local test_body=self.body
-		test_body.x+=self.velocity.x
-		local collision=level:collision(test_body)
-		if collision then
-			if self.velocity.x<0 then
-				self.x=collision.x+collision.width
-			elseif self.velocity.x>0 then
-				self.x=collision.x-self.body.width-4
-			end
-			self.velocity.x=0
-		end
-		
-		-- check for y collisions
-		self.grounded=false
-		local test_body=self.body
-		test_body.y+=self.velocity.y
-		local collision=level:collision(test_body)
-		if collision then
-			if self.velocity.y<0 then
-			elseif self.velocity.y>0 then
-				self.y=collision.y-self.body.height
+	 
+		local test_body={}
+		test_body.width=self.body.width
+		test_body.height=self.body.height
+	 
+	 -- y collisions (level) first
+		test_body.x=self.body.x
+		test_body.y=self.body.y
+	 test_body.y+=self.vel.y
+		local v_coll=level:collision(test_body)
+		if v_coll then
+			if self.vel.y<0 then
+				self.vel.y=bounce
+			elseif self.vel.y>0 then
 				self.grounded=true
+				self.vel.y=0
+				self.y=v_coll.y-16
 			end
-			self.velocity.y=0
+		else
+			self.grounded=false
 		end
 		
-		-- update movement for real
-		self.x+=self.velocity.x
-		self.y+=self.velocity.y
-		
-		-- screen wrapping
-		if self.x<-8 then
-			self.x=119
-		elseif self.x>119 then
-			self.x=-8
+		-- check x collisions (level)
+		test_body.x=self.body.x
+		test_body.y=self.body.y
+		test_body.x+=self.vel.x
+		local h_coll=level:collision(test_body)
+		if h_coll then
+			self.vel.x=0
 		end
+								
+		-- move for real		
+		self.y+=self.vel.y
+		self.x+=self.vel.x
+		
+		-- wrap at edges
+		wrap(self)
 		 
 		-- update body position
-		self.body.x=self.x+4
+		self.body.x=self.x+3
+		if self.direction==right then
+			self.body.x+=1
+		end
 		self.body.y=self.y
+		
+		-- update ball_body position
+		self.ball_body.x=self.body.x
+		self.ball_body.y=self.body.y
 		
 	end
 	
 	-- pick appropriate sprite	
 	self:animate()
+	
+	debug.message=self.grounded
 
 end
 
@@ -630,11 +670,7 @@ poke(0x5f2d, 0x1)
 debug={}
 
 function debug:draw()
-	local status=''
-	for message in all(self.messages) do
-		status=status..' '..message
-	end
-	--print(status,0,0,7)
+	print(self.message,0,0,7)
 end
 
 function debug:input()
@@ -651,15 +687,15 @@ function debug:input()
 		player.balloons=0
 	end
 	
+	if key=='e' then
+		enemies:new(64,64)
+	end
+	
 	if key=='l' then
 		player.lives+=1
 		if player.lives>2 then
 			player.lives=0
 		end
-	end
-	
-	if key=='e' then
-		enemies:new(64,64)
 	end
 	
 	if key=='f' then
@@ -673,11 +709,14 @@ function debug:input()
 end
 
 function debug:update()
+	--[[
 	self.messages={
 		'grnd:'..(player.grounded and '1' or '0'),
-		'vely:'..player.velocity.y,
-		'velx:'..player.velocity.x
+		'vely:'..player.vel.y,
+		'velx:'..player.vel.x
 	}
+	self:input()
+	]]
 	self:input()
 end
 -->8
@@ -706,40 +745,116 @@ end
 -->8
 -- enemies
 
-enemies={
-	units={}
-}
+enemies={}
 
-function enemies:draw()
-	for enemy in all(self.units) do
-		spr(72,enemy.x,enemy.y,2,2)
-	end
-end
-
+-- create new enemy
 function enemies:new(x,y)
+
 	local enemy={
 		x=x,
 		y=y,
+		balloon=true,
+		ball_body={
+			x=x,
+			y=y,
+			width=8,
+			height=8
+		},
 		body={
 			x=x,
 			y=y,
 			width=8,
 			height=16
 		},
-		velocity={
+		vel={
 			x=0,
 			y=0
-		}
+		},
+		sprite=72
 	}
-	add(self.units,enemy)
+	
+	-- animate one enemy
+	function enemy:animate()
+		if self.grounded then
+			self.sprite=1
+		else
+			self.sprite=72
+		end
+	end
+	
+	-- draw one enemy
+	function enemy:draw()
+		spr(
+				self.sprite,
+				self.x,
+				self.y,
+				2,
+				2
+		)
+	end
+	
+	-- update one enemy
+	function enemy:update()
+		self.vel.y+=gravity
+		self.y+=self.vel.y
+		self.body.x=self.x+4
+		self.body.y=self.y
+		local test_body={}
+		test_body.width=self.body.width
+		test_body.height=self.body.height	 
+	 -- y collisions (level) first
+		test_body.x=self.body.x
+		test_body.y=self.body.y
+	 test_body.y+=self.vel.y
+		local v_coll=level:collision(test_body)
+		if v_coll then
+			if self.vel.y<0 then
+				self.vel.y=bounce
+			elseif self.vel.y>0 then
+				self.grounded=true
+				self.vel.y=0
+				self.y=v_coll.y-16
+			end
+		else
+			self.grounded=false
+		end		
+		-- check x collisions (level)
+		test_body.x=self.body.x
+		test_body.y=self.body.y
+		test_body.x+=self.vel.x
+		local h_coll=level:collision(test_body)
+		if h_coll then
+			self.vel.x=0
+		end			
+		-- move for real		
+		self.y+=self.vel.y
+		self.x+=self.vel.x
+		-- wrap at edges
+		wrap(self)
+		-- update body position
+		self.body.x=self.x+3
+		if self.direction==right then
+			self.body.x+=1
+		end
+		self.body.y=self.y
+		
+	end
+
+	add(self,enemy)
+
 end
 
+-- draw all enemies
+function enemies:draw()
+	for enemy in all(self) do
+		enemy:draw()
+	end
+end
+
+-- update all enemies
 function enemies:update()
-	for enemy in all(self.units) do
-		enemy.velocity.y+=gravity
-		enemy.y+=enemy.velocity.y
-		enemy.body.x=enemy.x+4
-		enemy.body.y=enemy.y
+	for enemy in all(self) do
+		enemy:update()
 	end
 end
 
@@ -761,21 +876,21 @@ __gfx__
 1110c801111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110701111107011
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111107011111070111
 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
-11111108801111111111111111111111111111111111111111111111108801111111111110880111111111111088011111111111111111111111111111111111
-11111088780111111111110880111111111111088011111111111111088780111111111108878011111111110887801111111111111111111111111111111111
-11110888878011111111108878011111111110887801111111111110888878011111111088887801111111108888780111111111111111111111111111111111
-11110888888011111111088887801111111108888780111111111110888888011111111088888801111111108888880111111111111111111111111111111111
-11111088880111111111088888801111111108888880111111111111088880111111111108888011111111110888801111111111111111111111111111111111
-11111108801111111111108888011111111110888801111111111111108801111111111110880111111111111088011111111111111111111111111111111111
-1111110ccc0111111111110ccc0111111111110ccc01111111110ccc0070111111110ccc0070111111110ccc0070111111111111111111111111111111111111
-1111110ffcc011111111110ffcc011111111110ffcc0111111110ffcc701111111110ffcc701111111110ffcc701111111111111111111111111111111111111
-111110fffcc01111111110fffcc01111111110fffcc011111110fffcc01111111110fffcc01111111110fffcc011111111111111111111111111111111111111
-1111110ffc0111111111110ffc0111111111110ffc01111111110ffc0111111111110ffc0cf0111111110ffc0111111111111111111111111111111111111111
-111110c888c01111111110c888c01111111110c888c0111111111088c011111111110c88cff011111110ff8c8011111111111111111111111111111111111111
-11110fc878fc011111110fc878fc011111110fc878fc01111111088fc01111111110f888011111111110ffc88011111111111111111111111111111111111111
-11110f8888ff011111110f8888ff011111110f8888ff01111110f88ff0111111110c888880111111111108888c01111111111111111111111111111111111111
-1111108808801111111110880880111111111088088011111110cc08801111111110c0088c0111111111108088c0111111111111111111111111111111111111
-11110cc010cc011111110cc010cc011111110cc010cc0111111110cc0111111111111110cc01111111110cc01111111111111111111111111111111111111111
+11111088011111111111111111111111111111111111111111111111088011111111111108801111111111110880111111111111111111111111111111111111
+11110887801111111111108801111111111110880111111111111110887801111111111088780111111111108878011111111111111111111111111111111111
+11108888780111111111088780111111111108878011111111111108888780111111110888878011111111088887801111111111111111111111111111111111
+11108888880111111110888878011111111088887801111111111108888880111111110888888011111111088888801111111111111111111111111111111111
+11110888801111111110888888011111111088888801111111111110888801111111111088880111111111108888011111111111111111111111111111111111
+11111088011111111111088880111111111108888011111111111111088011111111111108801111111111110880111111111111111111111111111111111111
+111110ccc0111111111110ccc0111111111110ccc01111111110ccc0070111111110ccc0070111111110ccc00701111111111111111111111111111111111111
+111110ffcc011111111110ffcc011111111110ffcc0111111110ffcc701111111110ffcc701111111110ffcc7011111111111111111111111111111111111111
+11110fffcc01111111110fffcc01111111110fffcc011111110fffcc01111111110fffcc01111111110fffcc0111111111111111111111111111111111111111
+111110ffc0111111111110ffc0111111111110ffc01111111110ffc0111111111110ffc0cf0111111110ffc01111111111111111111111111111111111111111
+11110c888c01111111110c888c01111111110c888c0111111111088c011111111110c88cff011111110ff8c80111111111111111111111111111111111111111
+1110fc878fc011111110fc878fc011111110fc878fc01111111088fc01111111110f888011111111110ffc880111111111111111111111111111111111111111
+1110f8888ff011111110f8888ff011111110f8888ff01111110f88ff0111111110c888880111111111108888c011111111111111111111111111111111111111
+111108808801111111110880880111111111088088011111110cc08801111111110c0088c0111111111108088c01111111111111111111111111111111111111
+1110cc010cc011111110cc010cc011111110cc010cc0111111110cc0111111111111110cc01111111110cc011111111111111111111111111111111111111111
 1111108800880111111110880088011111111088008801111111108800880111111110bb01111111111110bb01111111111110bb011111111111111111111111
 111108878287801111110887828780111111088782878011111108878287801111110bb7b011111111110bb7b011111111110bb7b01111111111111111111111
 11108888782878011110888878287801111088887828780111108888782878011110bbbb7b0111111110bbbb7b0111111110bbbb7b0111111111111111111111
@@ -895,16 +1010,16 @@ bfbf85bfbf85bfbfbfbf84bfbf85bfbfffffffffffffffffffffffffffffffffffffffffffffffff
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbf949494949494bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfffbfbfffffffbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfffbfbfffbfffbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfffbfbfffbfffbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+bfbfbfbfbfffbfbfffffffbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
 bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbf1fbfbf1f1f1fbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbf1fbfbf1fbf1fbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbf1fbfbf1fbf1fbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbf1fbfbf1f1f1fbfbfbfbfbfbfbfbfbf1fbfbfbf1fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbf
-bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbf
+ffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf
+ffbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbfbfbfbfbfbfbf
+ffbfbf94bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbfbfbf84bfbf85bfbfbfbfbfbfbf84bfbf
+ffbfbf94bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbfbfbf85bfbf85bfbfbfbf84bfbf85bfbf
 9191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191
