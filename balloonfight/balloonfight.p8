@@ -6,10 +6,12 @@ __lua__
 -- july 2021
 -- version 0.1
 
+-- debugging
+draw_bodies=true
+
 -- constants
-test_mode=true
 ticks=0
-left=0
+left=-1
 right=1
 f_fg=0
 f_solid=1
@@ -139,7 +141,7 @@ play_mode={}
 function play_mode:init()
  bgstars:init()
  level:get()
- player.x=32
+ player.x=8
  player.y=90
 	_update=self.update
 	_draw=self.draw
@@ -447,24 +449,8 @@ function player:draw()
  		2,
  		flip_x
 	)
- rect(
- 		self.body.x,
- 		self.body.y,
- 		self.body.x+
- 				self.body.width,
- 		self.body.y+
- 				self.body.height,
- 		10
- )
- rect(
- 		self.ball_body.x,
- 		self.ball_body.y,
- 		self.ball_body.x+
- 				self.ball_body.width,
-			self.ball_body.y+
-					self.ball_body.height,
-			12
-	)
+	debug:draw_body(self.body,10)
+	debug:draw_body(self.ball_body,12)
 end
 
 -- update player movement
@@ -595,10 +581,12 @@ function enemies:new(x,y)
 	local enemy={
 		x=x,
 		y=y,
+		dir=left,
 		anim=1,
 		pump_anim=1,
-		balloon=true,
+		balloon=false,
 		inflate=0,
+		timer=0,
 		ball_body={
 			x=x,
 			y=y,
@@ -624,23 +612,33 @@ function enemies:new(x,y)
 	
 	-- animate one enemy
 	function enemy:animate()
+			
 		if ticks%3==0 then
 			self.anim+=1
 			if self.anim>4 then
 				self.anim=1
 			end
 		end
+		
 		if ticks%5==0 then
 			self.pump_anim+=1
 			if self.pump_anim>2 then
 				self.pump_anim=1
 			end
 		end
-		if self.grounded then
+		
+		if self.grounded and 
+				self.balloon==false then
 			self.sprite=self.sprites.pumping[self.pump_anim]
 		else
 			self.sprite=self.sprites.flying[self.anim]
 		end
+		
+	end
+	
+	-- make a random change
+	function enemy:change()
+		
 	end
 	
 	-- draw one enemy
@@ -652,26 +650,52 @@ function enemies:new(x,y)
 				2,
 				2
 		)
-		if self.grounded then
-			local index=flr(self.inflate/10)
+		
+		if self.grounded and
+				not self.balloon then
 			spr(
-					136+index,
-					self.x-8,
-					self.y+8
+					136+self.inflate,
+					self.x-4,
+					self.y+10
 			)
 		end
+
+		debug:draw_body(self.body,10)
+		debug:draw_body(self.ball_body,12)
+	
 	end
 	
 	-- update one enemy
 	function enemy:update()
+
+		-- gravity
 		self.vel.y+=gravity
-		self.y+=self.vel.y
-		self.body.x=self.x+4
-		self.body.y=self.y
+		
+		if self.balloon then
+			self.vel.y-=gravity*1.5
+			self.vel.x+=self.dir*aspeed
+			-- clamp speed
+			self.vel.x=mid(
+					-aspeed_max,
+					self.vel.x,
+					aspeed_max
+			)
+			if self.timer<=0 then
+				
+			end
+		end
+		
+		-- are too high on screen?
+	 if self.y<0 then
+			self.vel.y=bounce
+	 end
+		
+		-- movement test body
 		local test_body={}
 		test_body.width=self.body.width
-		test_body.height=self.body.height	 
-	 -- y collisions (level) first
+		test_body.height=self.body.height
+	 
+		-- level collisions (x)
 		test_body.x=self.body.x
 		test_body.y=self.body.y
 	 test_body.y+=self.vel.y
@@ -680,39 +704,49 @@ function enemies:new(x,y)
 			if self.vel.y<0 then
 				self.vel.y=bounce
 			elseif self.vel.y>0 then
-				self.grounded=true
+				if not self.balloon then
+					self.grounded=true
+				end
 				self.vel.y=0
 				self.y=v_coll.y-16
 			end
 		else
 			self.grounded=false
 		end
-		-- check x collisions (level)
+		
+		-- level collisions (y)
 		test_body.x=self.body.x
 		test_body.y=self.body.y
 		test_body.x+=self.vel.x
 		local h_coll=level:collision(test_body)
 		if h_coll then
 			self.vel.x=0
-		end			
+		end
+		
 		-- move for real		
 		self.y+=self.vel.y
 		self.x+=self.vel.x
+		
 		-- wrap at edges
 		wrap(self)
+		
 		-- update body position
 		self.body.x=self.x+3
 		if self.direction==right then
 			self.body.x+=1
 		end
 		self.body.y=self.y
+		self.ball_body.x=self.body.x
+		self.ball_body.y=self.body.y
 		
-		if self.grounded then
-			if ticks%30 then
+		if self.grounded and 
+				not self.balloon then
+			if ticks%30==0 then
 				self.inflate+=1
 				if self.inflate>2 then
-					self.grounded=false
+					self.balloon=true
 				end
+			end
 		else
 			self.inflate=0
 		end
@@ -772,63 +806,6 @@ function bgstars:draw()
  for bgstar in all(self) do
   pset(bgstar.x,bgstar.y,13) 
  end
-end
-
--------------------------------
--- debug
--------------------------------
-
-debug={}
-
-function debug:draw()
-	print(self.message,0,0,7)
-end
-
-function debug:input()
-	local key=stat(31)
-	
-	if key=='b' then
-		player.balloons+=1
-		if player.balloons>2 then
-			player.balloons=1
-		end
-	end
-	
-	if key=='d' then
-		player.balloons=0
-	end
-	
-	if key=='e' then
-		enemies:new(64,64)
-	end
-	
-	if key=='l' then
-		player.lives+=1
-		if player.lives>2 then
-			player.lives=0
-		end
-	end
-	
-	if key=='f' then
-		balloons:new()
-	end
-	
-	if key=='s' then
-		player.score+=1
-	end
-	
-end
-
-function debug:update()
-	--[[
-	self.messages={
-		'grnd:'..(player.grounded and '1' or '0'),
-		'vely:'..player.vel.y,
-		'velx:'..player.vel.x
-	}
-	self:input()
-	]]
-	self:input()
 end
 
 -------------------------------
@@ -937,6 +914,72 @@ function osd:draw()
 
 end
 
+-->8
+-- debug
+
+debug={
+	on=true
+}
+
+function debug:draw_body(body,c)
+	if self.on then
+		rect(
+			body.x,
+			body.y,
+			body.x+body.width,
+			body.y+body.height,
+			c
+		)
+	end
+end
+
+function debug:draw()
+	if self.on then
+		print(self.message,0,8,7)
+	end
+end
+
+function debug:input()
+	if self.on then
+		local key=stat(31)
+		if key=='b' then
+			player.balloons+=1
+			if player.balloons>2 then
+				player.balloons=1
+			end
+		end
+		if key=='d' then
+			player.balloons=0
+		end
+		if key=='e' then
+			enemies:new(64,64)
+		end
+		if key=='l' then
+			player.lives+=1
+			if player.lives>2 then
+				player.lives=0
+			end
+		end
+		if key=='f' then
+			balloons:new()
+		end
+		if key=='s' then
+			player.score+=1
+		end
+	end
+end
+
+function debug:update()
+	--[[
+	self.messages={
+		'grnd:'..(player.grounded and '1' or '0'),
+		'vely:'..player.vel.y,
+		'velx:'..player.vel.x
+	}
+	self:input()
+	]]
+	self:input()
+end
 __gfx__
 11111088011111111111108801111111111110880111111111111088011111111111111111111111111111111111111111111111111111111111111111111111
 11110887801111111111088780111111111108878011111111110887801111111111111111111111111111111111111111111111111111111111111111111111
